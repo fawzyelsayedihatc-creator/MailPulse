@@ -60,7 +60,7 @@ else:
     email, role, email_limit, emails_sent, is_active = user_data
     remaining = email_limit - emails_sent
 
-    # القائمة الجانبية Sidebar
+    # القائمة الجانبية
     with st.sidebar:
         st.markdown(f"### 👤 `{email}`")
         st.markdown(f"**الرتبة:** {'👑 أدمن' if role == 'admin' else '👤 مستخدم'}")
