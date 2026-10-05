@@ -6,7 +6,6 @@ def init_db(admin_email):
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
     
-    # جدول المستخدمين
     c.execute('''
         CREATE TABLE IF NOT EXISTS users (
             email TEXT PRIMARY KEY,
@@ -17,7 +16,6 @@ def init_db(admin_email):
         )
     ''')
     
-    # جدول سجل الحملات
     c.execute('''
         CREATE TABLE IF NOT EXISTS campaign_logs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -29,7 +27,6 @@ def init_db(admin_email):
         )
     ''')
     
-    # إضافة الأدمن الرئيسي
     c.execute("INSERT OR IGNORE INTO users (email, role, email_limit) VALUES (?, 'admin', 100000)", (admin_email.strip().lower(),))
     conn.commit()
     conn.close()
