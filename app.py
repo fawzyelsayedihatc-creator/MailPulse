@@ -1,10 +1,6 @@
 import streamlit as st
 import pandas as pd
 import database as db
-import base64
-from email.mime.text import MIMEText
-from google.oauth2.credentials import Credentials
-from googleapiclient.discovery import build
 from streamlit_quill import st_quill
 
 ADMIN_EMAIL = "fawziali2040@gmail.com"
@@ -57,10 +53,17 @@ if not st.session_state.logged_in:
 
 else:
     user_data = db.get_or_create_user(st.session_state.user_email)
-    email, role, email_limit, emails_sent, is_active = user_data
+    
+    # فك الضغط الآمن للبيانات
+    email = user_data[0]
+    role = user_data[1]
+    email_limit = user_data[2]
+    emails_sent = user_data[3]
+    is_active = user_data[4]
+    
     remaining = email_limit - emails_sent
 
-    # القائمة الجانبية
+    # القائمة الجانبية Sidebar
     with st.sidebar:
         st.markdown(f"### 👤 `{email}`")
         st.markdown(f"**الرتبة:** {'👑 أدمن' if role == 'admin' else '👤 مستخدم'}")
@@ -123,7 +126,7 @@ else:
                 st.session_state["df_campaign"] = df_data
 
         with tab_composer:
-            st.subheader("✉️ محرر الرسائل العصري بأسلوب Gmail")
+            st.subheader("✉️️ محرر الرسائل العصري بأسلوب Gmail")
             
             subject = st.text_input("موضوع الرسالة (Subject):", placeholder="مثال: مرحباً {{Name}}، تفاصيل البرنامج التدريبي")
             
