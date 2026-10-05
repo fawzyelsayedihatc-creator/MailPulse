@@ -27,7 +27,7 @@ def init_db(admin_email):
         )
     ''')
     
-    c.execute("INSERT OR IGNORE INTO users (email, role, email_limit) VALUES (?, 'admin', 100000)", (admin_email.strip().lower(),))
+    c.execute("INSERT OR IGNORE INTO users (email, role, email_limit, emails_sent, is_active) VALUES (?, 'admin', 100000, 0, 1)", (admin_email.strip().lower(),))
     conn.commit()
     conn.close()
 
@@ -35,12 +35,12 @@ def get_or_create_user(email):
     email = email.strip().lower()
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
-    c.execute("SELECT * FROM users WHERE email=?", (email,))
+    c.execute("SELECT email, role, email_limit, emails_sent, is_active FROM users WHERE email=?", (email,))
     user = c.fetchone()
     if not user:
         c.execute("INSERT INTO users (email, role, email_limit, emails_sent, is_active) VALUES (?, 'user', 100, 0, 1)", (email,))
         conn.commit()
-        c.execute("SELECT * FROM users WHERE email=?", (email,))
+        c.execute("SELECT email, role, email_limit, emails_sent, is_active FROM users WHERE email=?", (email,))
         user = c.fetchone()
     conn.close()
     return user
