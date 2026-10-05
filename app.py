@@ -105,6 +105,10 @@ else:
         
         with tab1:
             st.subheader("🔗 ربط شيت جوجل تلقائياً")
+            
+            # زر نقل مباشر لفتح Google Sheets
+            st.link_button("📂 فتح Google Sheets لاختيار الملف", "https://sheets.google.com", use_container_width=True)
+            
             sheet_url = st.text_input("أدخل رابط Google Sheet (يجب أن يكون عام أو قابل للقراءة):", placeholder="https://docs.google.com/spreadsheets/d/.../edit")
             
             df_data = None
