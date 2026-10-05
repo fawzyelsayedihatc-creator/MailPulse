@@ -1,293 +1,201 @@
 import streamlit as st
 import pandas as pd
-import database as db
-import base64
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
-from streamlit_quill import st_quill
-
-# مكتبات Google OAuth و Gmail API
 from google_auth_oauthlib.flow import Flow
-from googleapiclient.discovery import build
+from google.oauth2.credentials import Credentials
+import googleapiclient.discovery
+from email.mime.text import MIMEText
+import base64
 
-ADMIN_EMAIL = "fawzy.elsayed.ihatc@gmail.com"
+# ---------------------------------------------------------
+# 1. إعدادات الصفحة والتنسيق الرئيسي
+# ---------------------------------------------------------
+st.set_page_config(page_title="MailPulse", page_icon="✉️", layout="wide")
+
+st.markdown("""
+    <style>
+    .main-title { font-size: 36px; font-weight: bold; color: #008080; text-align: center; }
+    .sub-title { font-size: 18px; color: #555; text-align: center; margin-bottom: 25px; }
+    </style>
+""", unsafe_allow_html=True)
+
+st.markdown("<div class='main-title'>MailPulse ✉️</div>", unsafe_allow_html=True)
+st.markdown("<div class='sub-title'>منصة إدارة الحملات البريدية والربط المباشر مع Google Workspace</div>", unsafe_allow_html=True)
+
+# ---------------------------------------------------------
+# 2. إعدادات OAuth والنطاقات المطلوبة
+# ---------------------------------------------------------
 SCOPES = [
-    "https://www.googleapis.com/auth/gmail.send",
+    "openid",
     "https://www.googleapis.com/auth/userinfo.email",
-    "openid"
+    "https://www.googleapis.com/auth/userinfo.profile",
+    "https://www.googleapis.com/auth/gmail.send",
 ]
 
-# إعدادات الصفحة
-st.set_page_config(
-    page_title="MailPulse | منصة الحملات البريدية الاحترافية",
-    page_icon="✉️",
-    layout="wide"
-)
-
-# تهيئة قاعدة البيانات
-db.init_db(ADMIN_EMAIL)
-
-# إعداد OAuth Flow
 def get_oauth_flow():
-    client_id = st.secrets.get("google_oauth", {}).get("client_id", "758723171285-v83abei494261nbcsopqgm9omefrrm73.apps.googleusercontent.com")
-    client_secret = st.secrets.get("google_oauth", {}).get("client_secret", "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")
-    redirect_uri = st.secrets.get("google_oauth", {}).get("redirect_uri", "http://localhost:8501/")
-
+    """توليد كائن OAuth Flow من Secrets"""
     client_config = {
         "web": {
-            "client_id": client_id,
-            "client_secret": client_secret,
+            "client_id": st.secrets["google_oauth"]["client_id"],
+            "client_secret": st.secrets["google_oauth"]["client_secret"],
             "auth_uri": "https://accounts.google.com/o/oauth2/auth",
             "token_uri": "https://oauth2.googleapis.com/token",
-            "redirect_uris": [redirect_uri]
         }
     }
-    flow = Flow.from_client_config(
+    redirect_uri = st.secrets["google_oauth"]["redirect_uri"]
+    
+    return Flow.from_client_config(
         client_config,
         scopes=SCOPES,
         redirect_uri=redirect_uri
     )
-    return flow
 
-# دالة إرسال الإيميل المباشر عبر Gmail API
-def send_email_via_gmail_api(credentials, to_email, subject, body_html):
-    service = build('gmail', 'v1', credentials=credentials)
+def handle_login():
+    """إدارة عملية تسجيل الدخول وتخزين الجلسة"""
+    query_params = st.query_params
     
-    # جلب البريد الإلكتروني للراسل
-    user_profile = service.users().getProfile(userId='me').execute()
-    sender_email = user_profile.get('emailAddress')
+    # إذا كانت بيانات الاعتماد محفوظة سابقاً في الـ Session
+    if "credentials" in st.session_state:
+        return True
 
-    message = MIMEMultipart()
-    message['From'] = sender_email
-    message['To'] = to_email
-    message['Subject'] = subject
-    
-    msg_text = MIMEText(body_html, 'html')
-    message.attach(msg_text)
-    
-    raw_message = base64.urlsafe_b64encode(message.as_bytes()).decode('utf-8')
-    body = {'raw': raw_message}
-    
-    sent_message = service.users().messages().send(userId='me', body=body).execute()
-    return sent_message
-
-# إدارة الجلسة
-if "logged_in" not in st.session_state:
-    st.session_state.logged_in = False
-if "user_credentials" not in st.session_state:
-    st.session_state.user_credentials = None
-if "user_email" not in st.session_state:
-    st.session_state.user_email = ""
-if "current_page" not in st.session_state:
-    st.session_state.current_page = "new_campaign"
-
-# استقبال كود العودة من Google OAuth
-query_params = st.query_params
-if "code" in query_params and not st.session_state.logged_in:
-    code = query_params["code"]
-    try:
-        flow = get_oauth_flow()
-        flow.fetch_token(code=code)
-        credentials = flow.credentials
+    # التعامل مع الكود القادم من إعادة توجيه جوجل
+    if "code" in query_params:
+        auth_code = query_params["code"]
         
-        # جلب بريد المستخدم المسجل
-        service = build('oauth2', 'v2', credentials=credentials)
-        user_info = service.userinfo().get().execute()
-        user_email = user_info.get("email").strip().lower()
-        
-        u = db.get_or_create_user(user_email)
-        if u[4] == 0:
-            st.error("🔴 هذا الحساب معطل من قبل الأدمن.")
+        if "oauth_flow" in st.session_state:
+            flow = st.session_state["oauth_flow"]
         else:
-            st.session_state.logged_in = True
-            st.session_state.user_credentials = credentials
-            st.session_state.user_email = user_email
-            st.session_state.role = u[1]
+            flow = get_oauth_flow()
+            flow.code_verifier = None  # تعطيل PKCE لمنع خطأ missing code verifier
+
+        try:
+            flow.fetch_token(code=auth_code)
+            credentials = flow.credentials
+            
+            # حفظ التوكن في Session State لثبات الجلسة
+            st.session_state["credentials"] = {
+                "token": credentials.token,
+                "refresh_token": credentials.refresh_token,
+                "token_uri": credentials.token_uri,
+                "client_id": credentials.client_id,
+                "client_secret": credentials.client_secret,
+                "scopes": credentials.scopes
+            }
+            
+            # الحصول على البريد الإلكتروني للمستخدم
+            user_info_service = googleapiclient.discovery.build('oauth2', 'v2', credentials=credentials)
+            user_info = user_info_service.userinfo().get().execute()
+            st.session_state["user_email"] = user_info.get("email", "المستخدم")
+
             st.query_params.clear()
             st.rerun()
+            return True
+        except Exception as e:
+            st.error(f"حدث خطأ أثناء معالجة تسجيل الدخول: {e}")
+            st.query_params.clear()
+            return False
+
+    return False
+
+# ---------------------------------------------------------
+# 3. دالة إرسال البريد الإلكتروني عبر Gmail API
+# ---------------------------------------------------------
+def send_email_via_gmail(creds, to_email, subject, body_html):
+    try:
+        service = googleapiclient.discovery.build('gmail', 'v1', credentials=creds)
+        message = MIMEText(body_html, 'html')
+        message['to'] = to_email
+        message['subject'] = subject
+        
+        raw_message = base64.urlsafe_b64encode(message.as_bytes()).decode('utf-8')
+        service.users().messages().send(userId='me', body={'raw': raw_message}).execute()
+        return True, None
     except Exception as e:
-        st.error(f"خطأ في تسجيل الدخول عبر Google: {str(e)}")
+        return False, str(e)
 
-# ----------------- الشاشة الرئيسية -----------------
+# ---------------------------------------------------------
+# 4. واجهة التطبيق والتحكم
+# ---------------------------------------------------------
+is_logged_in = handle_login()
 
-if not st.session_state.logged_in:
-    _, col, _ = st.columns([1, 2, 1])
-    with col:
-        st.markdown("<h1 style='text-align: center; color: #059669;'>MailPulse ✉️</h1>", unsafe_allow_html=True)
-        st.markdown("<p style='text-align: center; color: #6B7280;'>منصة إدارة الحملات البريدية والربط المباشر مع Google Workspace</p>", unsafe_allow_html=True)
-        st.divider()
-        
-        st.subheader("🔐 تسجيل الدخول الآمن بحساب Google")
-        st.info("سيمكنك تسجيل الدخول من إرسال الحملات البريدية مباشرة من حساب Gmail الخاص بك وباسمك.")
-        
-        try:
-            flow = get_oauth_flow()
-            auth_url, _ = flow.authorization_url(prompt='consent', access_type='offline')
-            st.link_button("🌐 Sign in with Google (تسجيل الدخول مع جوجل)", auth_url, type="primary", use_container_width=True)
-        except Exception as ex:
-            st.error("يرجى التأكد من ضبط إعدادات OAuth في Streamlit Secrets أولاً.")
+if is_logged_in:
+    creds = Credentials(**st.session_state["credentials"])
+    user_email = st.session_state.get("user_email", "المستخدم")
+
+    # شريط علوي للمستخدم
+    col1, col2 = st.columns([4, 1])
+    with col1:
+        st.success(f"مرحباً بك يا دكتور! متصل حالياً بالحساب: **{user_email}**")
+    with col2:
+        if st.button("🚪 تسجيل الخروج", use_container_width=True):
+            del st.session_state["credentials"]
+            if "user_email" in st.session_state:
+                del st.session_state["user_email"]
+            st.rerun()
+
+    st.markdown("---")
+
+    # نموذج إنشاء وإرسال الحملة
+    st.subheader("📊 إنشاء حملة بريدية جديدة")
+
+    uploaded_file = st.file_uploader("رفع قائمة المستلمين (ملف Excel أو CSV):", type=["csv", "xlsx"])
+    
+    col_sub, col_name = st.columns(2)
+    with col_sub:
+        subject = st.text_input("موضوع البريد الإلكتروني:")
+    with col_name:
+        sender_title = st.text_input("اسم المرسل الظاهر:", value="MailPulse Team")
+
+    body_content = st.text_area("محتوى الرسالة (يدعم تنسيق HTML):", height=200, value="<p>مرحباً بك،</p><p>هذه رسالة تجريبية من منصة MailPulse.</p>")
+
+    if st.button("🚀 إرسال الحملة الآن", type="primary", use_container_width=True):
+        if not uploaded_file:
+            st.error("يرجى رفع ملف القائمة البريدية أولاً.")
+        elif not subject:
+            st.error("يرجى كتابة موضوع البريد الإلكتروني.")
+        else:
+            try:
+                if uploaded_file.name.endswith('.csv'):
+                    df = pd.read_csv(uploaded_file)
+                else:
+                    df = pd.read_excel(uploaded_file)
+
+                # البحث عن عمود البريد الإلكتروني
+                email_col = None
+                for col in df.columns:
+                    if 'email' in col.lower() or 'بريد' in col.lower() or 'الايميل' in col.lower():
+                        email_col = col
+                        break
+
+                if not email_col:
+                    st.error("لم يتم العثور على عمود يحتوي على البريد الإلكتروني (مثل Email أو البريد) في الملف.")
+                else:
+                    recipients = df[email_col].dropna().unique()
+                    st.info(f"جاري إرسال الحملة إلى {len(recipients)} مستلم...")
+                    
+                    progress_bar = st.progress(0)
+                    success_count = 0
+                    fail_count = 0
+
+                    for idx, email in enumerate(recipients):
+                        success, err = send_email_via_gmail(creds, email, subject, body_content)
+                        if success:
+                            success_count += 1
+                        else:
+                            fail_count += 1
+                        progress_bar.progress((idx + 1) / len(recipients))
+
+                    st.balloons()
+                    st.success(f"اكتملت العملية! تم الإرسال بنجاح إلى {success_count} مستلم. (فشل: {fail_count})")
+
+            except Exception as e:
+                st.error(f"حدث خطأ أثناء معالجة الملف: {e}")
 
 else:
-    user_data = db.get_or_create_user(st.session_state.user_email)
+    st.warning("يرجى تسجيل الدخول باستخدام حساب Google المعتمد للبدء.")
     
-    email = user_data[0]
-    role = user_data[1]
-    email_limit = user_data[2]
-    emails_sent = user_data[3]
-    is_active = user_data[4]
-    
-    remaining = email_limit - emails_sent
-
-    # القائمة الجانبية Sidebar
-    with st.sidebar:
-        st.markdown(f"### 👤 `{email}`")
-        st.markdown(f"**الرتبة:** {'👑 أدمن' if role == 'admin' else '👤 مستخدم'}")
-        st.metric("📊 الرصيد المتبقي", f"{remaining} إيميل", delta=f"المرسل: {emails_sent}")
-        st.divider()
-        
-        if st.button("🚀 حملة جديدة & Google Sheets", use_container_width=True):
-            st.session_state.current_page = "new_campaign"
-            st.rerun()
-            
-        if st.button("📊 تقارير التتبع والنتائج", use_container_width=True):
-            st.session_state.current_page = "tracking_reports"
-            st.rerun()
-
-        if role == 'admin':
-            if st.button("👑 لوحة تحكم الأدمن", use_container_width=True):
-                st.session_state.current_page = "admin_panel"
-                st.rerun()
-                
-        st.divider()
-        if st.button("🚪 تسجيل الخروج", use_container_width=True):
-            st.session_state.logged_in = False
-            st.session_state.user_credentials = None
-            st.session_state.user_email = ""
-            st.rerun()
-
-    # 1. صفحة إنشاء الحملة
-    if st.session_state.current_page == "new_campaign":
-        st.title("🚀 إنشاء حملة بريدية جديدة")
-        
-        tab_data, tab_composer = st.tabs(["1️⃣ اختيار شيت جوجل (Google Sheets)", "2️⃣ تحرير الرسالة (Gmail Style)"])
-        
-        with tab_data:
-            st.subheader("📂 الربط المباشر مع Google Drive & Sheets")
-            
-            c1, c2 = st.columns([3, 1])
-            with c1:
-                sheet_url = st.text_input("رابط Google Sheet المباشر:", placeholder="https://docs.google.com/spreadsheets/d/.../edit")
-            with c2:
-                st.write(" ")
-                st.write(" ")
-                st.link_button("📂 اختيار مباشر من Google Drive", "https://drive.google.com", use_container_width=True)
-            
-            df_data = None
-            if sheet_url:
-                try:
-                    csv_url = sheet_url.split("/edit")[0] + "/export?format=csv" if "/edit" in sheet_url else sheet_url
-                    df_data = pd.read_csv(csv_url)
-                    st.success("✅ تم جلب وقراءة بيانات Google Sheet بنجاح!")
-                    st.dataframe(df_data, use_container_width=True)
-                except Exception as e:
-                    st.error("تعذر قراءة الشيت مباشرةً. يرجى التأكد من اختيار الشيت الصحيح أو مشاركة الصلاحية.")
-
-            uploaded_file = st.file_uploader("أو رفع ملف CSV مباشرة:", type=["csv"])
-            if uploaded_file and df_data is None:
-                df_data = pd.read_csv(uploaded_file)
-                st.success("✅ تم تحميل الملف بنجاح!")
-                st.dataframe(df_data, use_container_width=True)
-                
-            if df_data is not None:
-                st.session_state["df_campaign"] = df_data
-
-        with tab_composer:
-            st.subheader("✉️ محرر الرسائل العصري بأسلوب Gmail")
-            
-            subject = st.text_input("موضوع الرسالة (Subject):", placeholder="مثال: مرحباً {{NAME}}، تفاصيل البرنامج التدريبي")
-            
-            content = st_quill(
-                placeholder="اكتب رسالتك هنا... استخدم التنسيقات المتنوعة والمتغيرات الذكية مثل {{NAME}}",
-                html=True,
-                key="quill_editor"
-            )
-
-            st.divider()
-            st.subheader("👁️ معاينة الرسالة الحية")
-            if content:
-                preview_html = content.replace("{{NAME}}", "دكتور فوزي")
-                st.components.v1.html(preview_html, height=220, scrolling=True)
-
-            st.divider()
-            if st.button("🚀 بدء الإرسال الفعلي عبر Gmail API الخاص بـ جوجل", type="primary", use_container_width=True):
-                if "df_campaign" not in st.session_state or st.session_state["df_campaign"] is None:
-                    st.error("يرجى اختيار وتأكيد الشيت أولاً من التبويب الأول.")
-                elif remaining < len(st.session_state["df_campaign"]):
-                    st.error(f"رصيدك المتاح ({remaining}) أقل من عدد المستهدفين ({len(st.session_state['df_campaign'])}).")
-                elif not st.session_state.user_credentials:
-                    st.error("جلسة تسجيل الدخول انتهت، يرجى إعادة تسجيل الدخول عبر جوجل.")
-                else:
-                    df = st.session_state["df_campaign"]
-                    sent_success = 0
-                    status_list = []
-
-                    progress_bar = st.progress(0)
-                    status_text = st.empty()
-
-                    for index, row in df.iterrows():
-                        recipient = row.get("NAME") or row.get("Email") or row.get("email")
-                        if recipient and "@" in str(recipient):
-                            try:
-                                sub_personalized = subject.replace("{{NAME}}", str(recipient))
-                                body_personalized = content.replace("{{NAME}}", str(recipient))
-                                
-                                send_email_via_gmail_api(
-                                    st.session_state.user_credentials,
-                                    str(recipient),
-                                    sub_personalized,
-                                    body_personalized
-                                )
-                                sent_success += 1
-                                status_list.append("Sent ✅")
-                            except Exception as ex:
-                                st.error(f"خطأ أثناء الإرسال لـ {recipient}: {str(ex)}")
-                                status_list.append(f"Failed ❌ ({str(ex)})")
-                        else:
-                            status_list.append("Failed ❌ (Invalid Email)")
-                        
-                        progress_bar.progress((index + 1) / len(df))
-                        status_text.text(f"جاري إرسال الرسالة {index + 1} من {len(df)}...")
-
-                    df["Sent Status"] = status_list
-                    db.update_sent_count(email, sent_success)
-                    st.success(f"🎉 تم إرسال {sent_success} رسالة حقيقية بنجاح مباشرة من حساب Gmail الخاص بك ({email})!")
-                    st.dataframe(df, use_container_width=True)
-
-    elif st.session_state.current_page == "tracking_reports":
-        st.title("📊 تقارير الحملات البريدية والتتبع اللحظي")
-        
-        m1, m2, m3 = st.columns(3)
-        m1.metric("إجمالي الرسائل المرسلة", f"{emails_sent}")
-        m2.metric("معدل الفتح (Open Rate)", "100%")
-        m3.metric("معدل النقر (CTR)", "0%")
-        
-        st.subheader("📋 سجل الإرسال المباشر")
-        st.info("تم تحديث قاعدة البيانات وسجلات الإرسال بنجاح.")
-
-    elif st.session_state.current_page == "admin_panel" and role == 'admin':
-        st.title("👑 لوحة تحكم الأدمن وإدارة أرصدة الحسابات")
-        users = db.get_all_users()
-        df_users = pd.DataFrame(users, columns=["البريد الإلكتروني", "الرتبة", "حد الإرسال", "الإيميلات المرسلة", "الحالة"])
-        st.dataframe(df_users, use_container_width=True)
-        
-        st.subheader("⚙️ تعديل رصيد مستخدم")
-        col1, col2, col3 = st.columns([2, 1, 1])
-        with col1:
-            selected_user = st.selectbox("اختر الحساب:", [u[0] for u in users])
-        with col2:
-            new_limit = st.number_input("الرصيد الجديد:", min_value=0, value=1000, step=100)
-        with col3:
-            if st.button("تحديث الرصيد"):
-                db.update_user_limit(selected_user, new_limit)
-                st.success("تم تحديث الرصيد بنجاح!")
-                st.rerun()
+    if st.button("🔑 تسجيل الدخول عبر Google", type="primary", use_container_width=True):
+        flow = get_oauth_flow()
+        auth_url, _ = flow.authorization_url(prompt="consent", access_type="offline")
+        st.session_state["oauth_flow"] = flow
+        st.markdown(f'<meta http-equiv="refresh" content="0;url={auth_url}">', unsafe_allow_html=True)
+        st.link_button("اضغط هنا إذا لم يتم تحويلك تلقائياً", auth_url)
