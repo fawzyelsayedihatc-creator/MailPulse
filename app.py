@@ -49,11 +49,11 @@ def get_oauth_flow():
     )
     return flow
 
-# دالة إرسال الإيميل المباشر عبر Gmail API مع تحديد الراسل صراحة
+# دالة إرسال الإيميل المباشر عبر Gmail API
 def send_email_via_gmail_api(credentials, to_email, subject, body_html):
     service = build('gmail', 'v1', credentials=credentials)
     
-    # جلب البريد الإلكتروني للراسل (المستخدم المسجل)
+    # جلب البريد الإلكتروني للراسل
     user_profile = service.users().getProfile(userId='me').execute()
     sender_email = user_profile.get('emailAddress')
 
@@ -81,7 +81,7 @@ if "user_email" not in st.session_state:
 if "current_page" not in st.session_state:
     st.session_state.current_page = "new_campaign"
 
-# استقبال كود العودة من Google OAuth عبر URL
+# استقبال كود العودة من Google OAuth
 query_params = st.query_params
 if "code" in query_params and not st.session_state.logged_in:
     code = query_params["code"]
@@ -122,7 +122,6 @@ if not st.session_state.logged_in:
         
         try:
             flow = get_oauth_flow()
-            # إجبار إظهار موافقة الصلاحيات (prompt='consent') لمنح صلاحية الإرسال الجديدة
             auth_url, _ = flow.authorization_url(prompt='consent', access_type='offline')
             st.link_button("🌐 Sign in with Google (تسجيل الدخول مع جوجل)", auth_url, type="primary", use_container_width=True)
         except Exception as ex:
@@ -242,7 +241,6 @@ else:
                                 sub_personalized = subject.replace("{{NAME}}", str(recipient))
                                 body_personalized = content.replace("{{NAME}}", str(recipient))
                                 
-                                # الإرسال الفعلي المباشر
                                 send_email_via_gmail_api(
                                     st.session_state.user_credentials,
                                     str(recipient),
@@ -273,4 +271,23 @@ else:
         m2.metric("معدل الفتح (Open Rate)", "100%")
         m3.metric("معدل النقر (CTR)", "0%")
         
-        st.subheader("📋 سجل الإرسال المباش
+        st.subheader("📋 سجل الإرسال المباشر")
+        st.info("تم تحديث قاعدة البيانات وسجلات الإرسال بنجاح.")
+
+    elif st.session_state.current_page == "admin_panel" and role == 'admin':
+        st.title("👑 لوحة تحكم الأدمن وإدارة أرصدة الحسابات")
+        users = db.get_all_users()
+        df_users = pd.DataFrame(users, columns=["البريد الإلكتروني", "الرتبة", "حد الإرسال", "الإيميلات المرسلة", "الحالة"])
+        st.dataframe(df_users, use_container_width=True)
+        
+        st.subheader("⚙️ تعديل رصيد مستخدم")
+        col1, col2, col3 = st.columns([2, 1, 1])
+        with col1:
+            selected_user = st.selectbox("اختر الحساب:", [u[0] for u in users])
+        with col2:
+            new_limit = st.number_input("الرصيد الجديد:", min_value=0, value=1000, step=100)
+        with col3:
+            if st.button("تحديث الرصيد"):
+                db.update_user_limit(selected_user, new_limit)
+                st.success("تم تحديث الرصيد بنجاح!")
+                st.rerun()
