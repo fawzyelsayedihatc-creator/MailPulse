@@ -6,3 +6,9 @@ google-api-python-client>=2.100.0
 gspread>=5.10.0
 pandas>=2.0.0
 matplotlib>=3.7.0
+streamlit
+pandas
+google-api-python-client
+google-auth-httplib2
+google-auth-oauthlib
+streamlit-quill
