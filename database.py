@@ -2,64 +2,70 @@ import sqlite3
 
 DB_NAME = "mailpulse.db"
 
-def get_db():
-    conn = sqlite3.connect(DB_NAME, check_same_thread=False)
-    return conn
-
 def init_db(admin_email):
-    conn = get_db()
-    cursor = conn.cursor()
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
     
-    # جدول اليوزرز
-    cursor.execute("""
+    # جدول المستخدمين
+    c.execute('''
         CREATE TABLE IF NOT EXISTS users (
             email TEXT PRIMARY KEY,
             role TEXT DEFAULT 'user',
             email_limit INTEGER DEFAULT 100,
             emails_sent INTEGER DEFAULT 0,
-            is_active INTEGER DEFAULT 1,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            is_active INTEGER DEFAULT 1
         )
-    """)
+    ''')
     
-    # تعيين حساب الأدمن الرئيسي تلقائياً
-    admin_clean = admin_email.strip().lower()
-    cursor.execute("""
-        INSERT INTO users (email, role, email_limit, is_active)
-        VALUES (?, 'admin', 999999, 1)
-        ON CONFLICT(email) DO UPDATE SET role='admin', is_active=1
-    """, (admin_clean,))
+    # جدول سجل الحملات
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS campaign_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_email TEXT,
+            recipient_email TEXT,
+            subject TEXT,
+            status TEXT,
+            sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
     
+    # إضافة الأدمن الرئيسي
+    c.execute("INSERT OR IGNORE INTO users (email, role, email_limit) VALUES (?, 'admin', 100000)", (admin_email.strip().lower(),))
     conn.commit()
     conn.close()
 
 def get_or_create_user(email):
-    email_clean = email.strip().lower()
-    conn = get_db()
-    cursor = conn.cursor()
-    cursor.execute("SELECT email, role, email_limit, emails_sent, is_active FROM users WHERE email = ?", (email_clean,))
-    user = cursor.fetchone()
-    
+    email = email.strip().lower()
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    c.execute("SELECT * FROM users WHERE email=?", (email,))
+    user = c.fetchone()
     if not user:
-        cursor.execute("INSERT INTO users (email, role, email_limit, emails_sent, is_active) VALUES (?, 'user', 100, 0, 1)", (email_clean,))
+        c.execute("INSERT INTO users (email, role, email_limit, emails_sent, is_active) VALUES (?, 'user', 100, 0, 1)", (email,))
         conn.commit()
-        cursor.execute("SELECT email, role, email_limit, emails_sent, is_active FROM users WHERE email = ?", (email_clean,))
-        user = cursor.fetchone()
-        
+        c.execute("SELECT * FROM users WHERE email=?", (email,))
+        user = c.fetchone()
     conn.close()
     return user
 
+def get_all_users():
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    c.execute("SELECT email, role, email_limit, emails_sent, is_active FROM users")
+    users = c.fetchall()
+    conn.close()
+    return users
+
 def update_user_limit(email, new_limit):
-    conn = get_db()
-    cursor = conn.cursor()
-    cursor.execute("UPDATE users SET email_limit = ? WHERE email = ?", (new_limit, email.strip().lower()))
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    c.execute("UPDATE users SET email_limit=? WHERE email=?", (new_limit, email))
     conn.commit()
     conn.close()
 
-def get_all_users():
-    conn = get_db()
-    cursor = conn.cursor()
-    cursor.execute("SELECT email, role, email_limit, emails_sent, is_active FROM users")
-    users = cursor.fetchall()
+def update_sent_count(email, count):
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    c.execute("UPDATE users SET emails_sent = emails_sent + ? WHERE email=?", (count, email))
+    conn.commit()
     conn.close()
-    return users
